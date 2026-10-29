@@ -344,7 +344,9 @@ const localStore={
 };
 tasks=lsLoad(); store=localStore;
 const fix=t=>({subs:[],due:null,rep:null,top:null,pomos:0,postponed:0,doneAt:null,...t});
-const isUrg=t=>!!t.urg || (!!t.due && daysLeft(t.due)<=2);
+// Bạn đã tự chọn Gấp/Không gấp thì giữ đúng lựa chọn đó; chưa chọn thì tự tính theo hạn chót (còn ≤2 ngày)
+const autoUrg=due=>!!due && daysLeft(due)<=2;
+const isUrg=t=>t.urgSet ? !!t.urg : (!!t.urg || autoUrg(t.due));
 const quadOf=t=>t.imp ? (isUrg(t)?1:2) : (isUrg(t)?3:4);
 const isTop=t=>t.top===today();
 
@@ -530,7 +532,7 @@ function showDraft(){
   const catW=catSelect(draft.cat,v=>{draft.cat=v; draft.catTouched=true;}); catW.id="draft-cat";
   c1.append(catW,
     toggle("⭐ Quan trọng","imp",draft.imp,v=>{draft.imp=v; draft.impTouched=true;}),
-    toggle("⚡ Gấp","urg",draft.urg,v=>draft.urg=v),
+    toggle("⚡ Gấp","urg",draft.urgSet?draft.urg:autoUrg(draft.due),v=>{draft.urg=v; draft.urgSet=true;}),
     toggle("📌 Top 3 hôm nay","top",draft.top,v=>draft.top=v));
   const c2=el("div","chips");
   c2.append(dateField(draft.due,v=>draft.due=v), repField(draft.rep,v=>draft.rep=v));
@@ -544,7 +546,7 @@ async function commitDraft(){
   if(!draft) return; const d=draft; draft=null; showDraft();
   if(d.top && tasks.filter(t=>isTop(t)&&!t.done).length>=3){ d.top=false; say("Top 3 hôm nay đầy rồi, mình để việc này ngoài Top 3 nha."); }
   learn(d.text,d.cat);
-  const t={text:d.text,cat:d.cat,imp:!!d.imp,urg:!!d.urg,due:d.due||null,rep:d.rep||null,top:d.top?today():null,subs:[],pomos:0,postponed:0,done:false,doneAt:null,createdAt:Date.now()};
+  const t={text:d.text,cat:d.cat,imp:!!d.imp,urg:d.urgSet?!!d.urg:false,urgSet:!!d.urgSet,due:d.due||null,rep:d.rep||null,top:d.top?today():null,subs:[],pomos:0,postponed:0,done:false,doneAt:null,createdAt:Date.now()};
   try{ await store.add(t); say(`${pick(cheers)} → ô “${QUADS.find(x=>x.q===quadOf(t)).name}”.`); }
   catch(e){ say("Lưu chưa được, thử gửi lại nha."); }
   document.getElementById("task-input").focus();
@@ -569,7 +571,7 @@ async function setDone(t,v){
     await store.update(t.id,{done:true,doneAt:Date.now()});
     say(pick(doneCheers)+" ("+t.text+")"); confetti(40);
     if(t.rep){ const base=t.due||today(); let nd=nextDue(base,t.rep); while(daysLeft(nd)<0) nd=nextDue(nd,t.rep);
-      await store.add({text:t.text,cat:t.cat,imp:t.imp,urg:t.urg,due:nd,rep:t.rep,top:null,subs:(t.subs||[]).map(s=>({text:s.text,done:false})),pomos:0,postponed:0,done:false,doneAt:null,createdAt:Date.now()});
+      await store.add({text:t.text,cat:t.cat,imp:t.imp,urg:t.urg,urgSet:!!t.urgSet,due:nd,rep:t.rep,top:null,subs:(t.subs||[]).map(s=>({text:s.text,done:false})),pomos:0,postponed:0,done:false,doneAt:null,createdAt:Date.now()});
       say(`🔁 Đã tạo lại cho lần sau (${fmtDue(nd).t}).`); }
   } else await store.update(t.id,{done:false,doneAt:null});
 }
@@ -646,7 +648,7 @@ function editPanel(t){
   const c1=el("div","chips");
   c1.append(catSelect(t.cat,v=>{store.update(t.id,{cat:v}); learn(t.text,v);}),
     toggle("⭐ Quan trọng","imp",t.imp,v=>store.update(t.id,{imp:v})),
-    toggle("⚡ Gấp","urg",t.urg,v=>store.update(t.id,{urg:v})));
+    toggle("⚡ Gấp","urg",isUrg(t),v=>store.update(t.id,{urg:v,urgSet:true})));
   const c2=el("div","chips"); c2.append(dateField(t.due,v=>setDue(t,v)), repField(t.rep,v=>store.update(t.id,{rep:v})));
   const subs=el("div","subs");
   (t.subs||[]).forEach((s,i)=>{
@@ -711,7 +713,7 @@ function renderOverdue(){
     if((t.postponed||0)>=3) q.append(el("span","ask",`Đã dời ${t.postponed} lần. Làm luôn, nhờ người, hay bỏ?`));
     const b1=el("button","tg","Làm hôm nay"); b1.type="button"; b1.onclick=()=>{ const patch={due:today()}; if(tasks.filter(x=>isTop(x)&&!x.done).length<3) patch.top=today(); store.update(t.id,patch); };
     const b2=el("button","tg","Dời sang mai"); b2.type="button"; b2.onclick=()=>store.update(t.id,{due:ymd(addDays(new Date(),1)),postponed:(t.postponed||0)+1});
-    const b3=el("button","tg","Nhờ người"); b3.type="button"; b3.onclick=()=>store.update(t.id,{imp:false,urg:true,due:today()});
+    const b3=el("button","tg","Nhờ người"); b3.type="button"; b3.onclick=()=>store.update(t.id,{imp:false,urg:true,urgSet:true,due:today()});
     const b4=el("button","tg danger","Bỏ"); b4.type="button"; b4.onclick=()=>store.remove(t.id);
     q.append(b1,b2,b3,b4); li.append(q); ul.append(li);
   });
