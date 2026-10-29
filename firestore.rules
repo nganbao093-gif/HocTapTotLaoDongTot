@@ -1,0 +1,17 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Việc, cài đặt, dữ liệu học phân loại: chỉ chủ tài khoản đọc/ghi
+    match /users/{uid}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+    // Bảng thi đua: ai đăng nhập cũng đọc được, mỗi người chỉ ghi điểm của mình
+    match /board/{uid} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['week','points','done','impDone','streak','today','top3','top3done','code','nick','updatedAt'])
+        && request.resource.data.nick is string && request.resource.data.nick.size() <= 30
+        && request.resource.data.code is string && request.resource.data.code.size() == 6;
+    }
+  }
+}
